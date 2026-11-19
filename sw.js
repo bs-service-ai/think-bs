@@ -1,5 +1,5 @@
 /* Think BS:オフラインでも開けるように、アプリ本体を端末に保存する */
-const CACHE = "thinkbs-v1";
+const CACHE = "thinkbs-v2";
 const ASSETS = ["./", "./index.html", "./style.css", "./app.js", "./config.js", "./manifest.webmanifest",
   "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
