@@ -73,6 +73,9 @@
         <button type="button" id="chPhoto">
           <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
           写真から<span>撮影・画像を選ぶ</span></button>
+        <button type="button" id="chSketch">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 6l3 3"/></svg>
+          手書きから<span>ペンで描く</span></button>
         <button type="button" id="chMemo">
           <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h10l4 4v12H5z"/><path d="M8 11h8M8 15h6"/></svg>
           メモから<span>文字を先に入力</span></button>
@@ -99,7 +102,7 @@
       </div>
       <div class="f"><span>画像(1件につき3枚まで)</span>
         <div class="imgslots" id="slots"></div>
-        <p class="hint">スマホでは「カメラ」または「写真ライブラリ」から選べます。保存時に自動で縮小します。</p>
+        <p class="hint">「画像」はカメラや写真ライブラリから、「手書き」はペンや指で描けます。写真の「✎ 書き込み」で矢印や寸法を書き込めます。</p>
       </div>
       <div class="f">
         <div class="labelrow"><label for="fMemo">メモ</label>
@@ -178,6 +181,33 @@
     <div class="dbody" id="syBody"></div>
     <div class="dfoot" id="syFoot"></div>
   </div>
+</div>
+
+<div class="sketch" id="sk" hidden role="dialog" aria-modal="true" aria-labelledby="skTitle">
+  <div class="sktools">
+    <strong id="skTitle" class="sktitle">手書き</strong>
+    <div class="skgroup" role="group" aria-label="ペンの色">
+      <button type="button" class="sw" data-skc="#1c1f23" style="--c:#1c1f23" aria-label="黒"></button>
+      <button type="button" class="sw" data-skc="#d93025" style="--c:#d93025" aria-label="赤"></button>
+      <button type="button" class="sw" data-skc="#1a5fd1" style="--c:#1a5fd1" aria-label="青"></button>
+      <button type="button" class="sw" data-skc="#ff7a1a" style="--c:#ff7a1a" aria-label="オレンジ"></button>
+      <button type="button" class="sw" data-skc="#ffffff" style="--c:#ffffff" aria-label="白"></button>
+    </div>
+    <div class="skgroup" role="group" aria-label="太さ">
+      <button type="button" class="wd" data-skw="2" aria-pressed="false" aria-label="細"><i style="--s:4px"></i>細</button>
+      <button type="button" class="wd" data-skw="5" aria-pressed="true" aria-label="中"><i style="--s:8px"></i>中</button>
+      <button type="button" class="wd" data-skw="10" aria-pressed="false" aria-label="太"><i style="--s:13px"></i>太</button>
+    </div>
+    <div class="skgroup">
+      <button type="button" class="tl" id="skEraser" aria-pressed="false">消しゴム</button>
+      <button type="button" class="tl" id="skUndo">元に戻す</button>
+      <button type="button" class="tl" id="skClear">全部消す</button>
+    </div>
+    <span class="spacer"></span>
+    <button type="button" class="btn" id="skCancel">キャンセル</button>
+    <button type="button" class="btn primary" id="skSave">保存</button>
+  </div>
+  <div class="skstage" id="skStage"><canvas id="skCanvas"></canvas></div>
 </div>
 
 <div class="lightbox" id="lb" hidden>

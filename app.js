@@ -206,12 +206,14 @@ $("vList").onclick = () => { S.view = "list"; store.set("view", "list"); render(
 document.querySelectorAll(".overlay").forEach(ov => ov.addEventListener("mousedown", e => { if (e.target === ov) closeOverlay(ov); }));
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
+  if (!$("sk").hidden) { $("skCancel").click(); return; }
   if (!$("lb").hidden) { $("lb").hidden = true; return; }
   const open = [...document.querySelectorAll(".overlay")].reverse().find(o => !o.hidden); closeOverlay(open);
 });
 
 /* ---------- 新規 ---------- */
 $("fab").onclick = () => { $("ovChoice").hidden = false; };
+$("chSketch").onclick = () => { $("ovChoice").hidden = true; openEditor(null, []); openSketch(null, null); };
 $("chMemo").onclick = () => { $("ovChoice").hidden = true; openEditor(null, []); setTimeout(() => $("fTitle").focus(), 60); };
 $("chPhoto").onclick = () => { $("filePick").value = ""; $("filePick").click(); };
 $("filePick").addEventListener("change", async e => {
@@ -282,12 +284,14 @@ function drawSlots() {
   let h = "";
   for (let k = 0; k < 3; k++) {
     const m = E.images[k];
-    if (m) h += `<div class="slot">${m.data ? `<img src="${m.data}" alt="画像${k + 1}">` : `<span>画像${k + 1}<br>(読み込み中)</span>`}<button type="button" class="rm" data-rm="${k}">✕ 外す</button></div>`;
-    else if (k === E.images.length) h += `<button type="button" class="slot" id="addImg"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>画像を追加</button>`;
+    if (m) h += `<div class="slot">${m.data ? `<img src="${m.data}" alt="画像${k + 1}">` : `<span>画像${k + 1}<br>(読み込み中)</span>`}<button type="button" class="rm" data-rm="${k}">✕ 外す</button>${m.data ? `<button type="button" class="pen" data-annot="${k}">✎ 書き込み</button>` : ""}</div>`;
+    else if (k === E.images.length) h += `<div class="slot addslot"><button type="button" id="addImg"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>画像</button><button type="button" id="addSketch"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 6l3 3"/></svg>手書き</button></div>`;
     else h += `<div class="slot" aria-hidden="true"></div>`;
   }
   $("slots").innerHTML = h;
   const add = $("addImg"); if (add) add.onclick = () => { $("fileAdd").value = ""; $("fileAdd").click(); };
+  const sk = $("addSketch"); if (sk) sk.onclick = () => openSketch(null, null);
+  $("slots").querySelectorAll("[data-annot]").forEach(b => b.onclick = () => { const k = +b.dataset.annot; openSketch(k, E.images[k].data); });
   $("slots").querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { E.images.splice(+b.dataset.rm, 1); drawSlots(); });
 }
 $("fileAdd").addEventListener("change", async e => {
@@ -541,6 +545,105 @@ $("dtPrint").onclick = async () => {
   const imgs = [...$("printArea").querySelectorAll("img")];
   await Promise.all(imgs.map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; })));
   try { window.print(); } catch (e) { toast("この画面では印刷を開始できませんでした"); }
+};
+
+/* ---------- 手書き ---------- */
+const SK = { base: null, ink: null, strokes: [], cur: null, color: "#1c1f23", w: 5, erase: false, target: null, penSeen: false, raf: 0, armedCancel: false };
+const skCv = $("skCanvas"), skCtx = skCv.getContext("2d");
+function loadImgEl(src) { return new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; }); }
+async function openSketch(target, src) {
+  if (target === null && E.images.length >= 3) { toast("画像は1件につき3枚までです"); return; }
+  const stage = $("skStage");
+  $("sk").hidden = false;
+  let W, H, img = null;
+  if (src) img = await loadImgEl(src);
+  if (img) { W = img.naturalWidth; H = img.naturalHeight; }
+  else if (stage.clientHeight > stage.clientWidth) { W = 1200; H = 1600; } else { W = 1600; H = 1200; }
+  skCv.width = W; skCv.height = H;
+  SK.base = document.createElement("canvas"); SK.base.width = W; SK.base.height = H;
+  const b = SK.base.getContext("2d"); b.fillStyle = "#ffffff"; b.fillRect(0, 0, W, H); if (img) b.drawImage(img, 0, 0);
+  SK.ink = document.createElement("canvas"); SK.ink.width = W; SK.ink.height = H;
+  SK.strokes = []; SK.cur = null; SK.target = target; SK.armedCancel = false; $("skCancel").textContent = "キャンセル";
+  SK.erase = false; setSkColor(img ? "#d93025" : "#1c1f23");
+  $("skTitle").textContent = img ? "写真に書き込み" : "手書き";
+  fitSketch(); compose(); updSkButtons();
+}
+function fitSketch() {
+  if ($("sk").hidden) return;
+  const st = $("skStage"); const sc = Math.min((st.clientWidth - 16) / skCv.width, (st.clientHeight - 16) / skCv.height);
+  skCv.style.width = Math.floor(skCv.width * sc) + "px"; skCv.style.height = Math.floor(skCv.height * sc) + "px";
+}
+window.addEventListener("resize", fitSketch);
+function compose() { skCtx.globalCompositeOperation = "source-over"; skCtx.drawImage(SK.base, 0, 0); skCtx.drawImage(SK.ink, 0, 0); }
+function seg(ctx, s, a, b) {
+  ctx.globalCompositeOperation = s.erase ? "destination-out" : "source-over";
+  ctx.strokeStyle = s.color; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.lineWidth = s.width * (s.pen ? 0.45 + (b[2] || 0.5) * 1.1 : 1);
+  ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0] + (a === b ? 0.01 : 0), b[1]); ctx.stroke();
+}
+function replay() {
+  const c = SK.ink.getContext("2d"); c.clearRect(0, 0, SK.ink.width, SK.ink.height);
+  for (const s of SK.strokes) {
+    if (s.clear) { c.clearRect(0, 0, SK.ink.width, SK.ink.height); continue; }
+    s.points.forEach((p, k) => seg(c, s, s.points[k - 1] || p, p));
+  }
+  compose();
+}
+function pt(e) {
+  const r = skCv.getBoundingClientRect();
+  return [(e.clientX - r.left) * skCv.width / r.width, (e.clientY - r.top) * skCv.height / r.height, e.pressure || 0.5];
+}
+function schedule() { if (!SK.raf) SK.raf = requestAnimationFrame(() => { SK.raf = 0; compose(); }); }
+skCv.addEventListener("pointerdown", e => {
+  if (e.pointerType === "pen") SK.penSeen = true;
+  if (SK.penSeen && e.pointerType === "touch") return; // ペン使用中は手のひらのタッチを無視
+  if (SK.cur) return;
+  e.preventDefault(); try { skCv.setPointerCapture(e.pointerId); } catch (x) {}
+  const ratio = skCv.width / skCv.getBoundingClientRect().width;
+  const p = pt(e);
+  SK.cur = { id: e.pointerId, color: SK.color, width: (SK.erase ? SK.w * 3 : SK.w) * ratio, erase: SK.erase, pen: e.pointerType === "pen", points: [p] };
+  seg(SK.ink.getContext("2d"), SK.cur, p, p); schedule();
+  SK.armedCancel = false; $("skCancel").textContent = "キャンセル";
+});
+skCv.addEventListener("pointermove", e => {
+  if (!SK.cur || e.pointerId !== SK.cur.id) return;
+  e.preventDefault();
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  const c = SK.ink.getContext("2d");
+  for (const ev of (evs.length ? evs : [e])) { const p = pt(ev); const pts = SK.cur.points; seg(c, SK.cur, pts[pts.length - 1], p); pts.push(p); }
+  schedule();
+});
+function endStroke(e) { if (!SK.cur || e.pointerId !== SK.cur.id) return; SK.strokes.push(SK.cur); SK.cur = null; updSkButtons(); }
+skCv.addEventListener("pointerup", endStroke);
+skCv.addEventListener("pointercancel", endStroke);
+skCv.addEventListener("touchmove", e => e.preventDefault(), { passive: false });
+function setSkColor(c) {
+  SK.color = c; SK.erase = false;
+  document.querySelectorAll("[data-skc]").forEach(b => b.setAttribute("aria-pressed", b.dataset.skc === c));
+  $("skEraser").setAttribute("aria-pressed", "false");
+}
+document.querySelectorAll("[data-skc]").forEach(b => b.onclick = () => setSkColor(b.dataset.skc));
+document.querySelectorAll("[data-skw]").forEach(b => b.onclick = () => {
+  SK.w = +b.dataset.skw; document.querySelectorAll("[data-skw]").forEach(x => x.setAttribute("aria-pressed", x === b));
+});
+$("skEraser").onclick = () => {
+  SK.erase = !SK.erase; $("skEraser").setAttribute("aria-pressed", SK.erase);
+  document.querySelectorAll("[data-skc]").forEach(b => b.setAttribute("aria-pressed", !SK.erase && b.dataset.skc === SK.color));
+};
+function updSkButtons() { const has = SK.strokes.length > 0; $("skUndo").disabled = !has; $("skClear").disabled = !has || SK.strokes[SK.strokes.length - 1].clear; }
+$("skUndo").onclick = () => { SK.strokes.pop(); replay(); updSkButtons(); };
+$("skClear").onclick = () => { SK.strokes.push({ clear: true }); replay(); updSkButtons(); toast("全部消しました(「元に戻す」で戻せます)"); };
+$("skCancel").onclick = () => {
+  const drawn = SK.strokes.some(s => !s.clear);
+  if (drawn && !SK.armedCancel) { SK.armedCancel = true; $("skCancel").textContent = "もう一度押すと破棄"; return; }
+  $("sk").hidden = true;
+};
+$("skSave").onclick = () => {
+  compose();
+  const data = skCv.toDataURL("image/jpeg", 0.85);
+  const im = { id: uid(), driveId: null, data };
+  if (SK.target === null) E.images.push(im); else E.images[SK.target] = im;
+  $("sk").hidden = true; drawSlots(); toast(SK.target === null ? "手書きを追加しました" : "書き込みを保存しました");
 };
 
 /* ---------- 画像の拡大 ---------- */
