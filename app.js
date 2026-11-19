@@ -106,19 +106,23 @@ function allTags() {
   const m = new Map(); S.ideas.forEach(i => i.tags.forEach(t => m.set(t, (m.get(t) || 0) + 1)));
   return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ja"));
 }
-/* フォルダは「親」または「親/子」の2段。値は "/" でつないだ文字列で持つ */
+/* フォルダは最大5段。値は "親/子/孫" のように "/" でつないだ文字列で持つ */
 const SEP = "/";
-const parentOf = p => p.includes(SEP) ? p.slice(0, p.indexOf(SEP)) : null;
-const leafOf = p => p.includes(SEP) ? p.slice(p.indexOf(SEP) + 1) : p;
+const MAX_DEPTH = 5;
+const parentOf = p => p.includes(SEP) ? p.slice(0, p.lastIndexOf(SEP)) : null;
+const leafOf = p => p.includes(SEP) ? p.slice(p.lastIndexOf(SEP) + 1) : p;
+const depthOf = p => p.split(SEP).length - 1;
+const topOf = p => p.split(SEP)[0];
+const indentLabel = p => depthOf(p) ? "　".repeat(depthOf(p) - 1) + "└ " + leafOf(p) : p;
 const pretty = p => p.split(SEP).join(" › ");
 const inFolder = (i, f) => i.folder === f || i.folder.startsWith(f + SEP);
 const cleanName = v => v.replace(/[\/／]/g, " ").replace(/\s+/g, " ").trim();
 function folderList() {
   const raw = [...new Set([...S.folders, ...S.ideas.map(i => i.folder)])];
-  for (const f of [...raw]) { const p = parentOf(f); if (p && !raw.includes(p)) raw.push(p); }
-  const tops = raw.filter(f => !parentOf(f));
+  for (let k = 0; k < raw.length; k++) { const p = parentOf(raw[k]); if (p && !raw.includes(p)) raw.push(p); }
   const out = [];
-  for (const t of tops) { out.push(t); raw.filter(f => parentOf(f) === t).forEach(c => out.push(c)); }
+  const walk = par => raw.filter(f => parentOf(f) === par).forEach(f => { out.push(f); walk(f); });
+  walk(null);
   return out;
 }
 function filtered() {
@@ -132,11 +136,19 @@ function render() {
   const cnt = f => S.ideas.filter(i => f === "all" || inFolder(i, f)).length;
   const fl = ["all", ...folderList()];
   if (S.folder !== "all" && !fl.includes(S.folder)) S.folder = "all";
-  $("folders").innerHTML = fl.map(f => `<button type="button" class="${f !== "all" && parentOf(f) ? "sub" : ""}" data-folder="${esc(f)}" aria-current="${S.folder === f}"><span>${f === "all" ? "すべて" : esc(leafOf(f))}</span><span class="n">${cnt(f)}</span></button>`).join("");
-  const top = S.folder === "all" ? null : (parentOf(S.folder) || S.folder);
-  const subs = top ? fl.filter(f => f !== "all" && parentOf(f) === top) : [];
+  $("folders").innerHTML = fl.map(f => `<button type="button" class="${f !== "all" && parentOf(f) ? "sub" : ""}" style="--d:${f === "all" ? 0 : depthOf(f)}" data-folder="${esc(f)}" aria-current="${S.folder === f}"><span>${f === "all" ? "すべて" : esc(leafOf(f))}</span><span class="n">${cnt(f)}</span></button>`).join("");
+  const top = S.folder === "all" ? null : topOf(S.folder);
+  // スマホ:選んだフォルダの中(なければ同じ階層)を2行目に出す
+  const kids = par => fl.filter(f => f !== "all" && parentOf(f) === par);
+  let base = S.folder === "all" ? null : S.folder;
+  if (base && !kids(base).length) base = parentOf(base);
+  const subs = base ? kids(base) : [];
   $("mSub").hidden = !subs.length;
-  $("mSub").innerHTML = subs.length ? `<button type="button" class="chip" data-folder="${esc(top)}" aria-pressed="${S.folder === top}">${esc(top)}のすべて</button>` + subs.map(f => `<button type="button" class="chip" data-folder="${esc(f)}" aria-pressed="${S.folder === f}">└ ${esc(leafOf(f))} ${cnt(f)}</button>`).join("") : "";
+  $("mSub").innerHTML = subs.length
+    ? (parentOf(base) ? `<button type="button" class="chip" data-folder="${esc(parentOf(base))}">↑ 上へ</button>` : "")
+      + `<button type="button" class="chip" data-folder="${esc(base)}" aria-pressed="${S.folder === base}">${esc(leafOf(base))}のすべて</button>`
+      + subs.map(f => `<button type="button" class="chip" data-folder="${esc(f)}" aria-pressed="${S.folder === f || S.folder.startsWith(f + SEP)}">└ ${esc(leafOf(f))} ${cnt(f)}</button>`).join("")
+    : "";
   $("mFolders").innerHTML = fl.filter(f => f === "all" || !parentOf(f)).map(f => `<button type="button" class="chip" data-folder="${esc(f)}" aria-pressed="${S.folder === f || (f !== "all" && f === top)}">${f === "all" ? "すべて" : esc(f)} ${cnt(f)}</button>`).join("")
     + `<button type="button" class="chip" data-manage-folders>✎ フォルダ編集</button>`;
   const tags = allTags();
@@ -256,9 +268,9 @@ async function openEditor(id, newImages) {
   $("edTitle").textContent = id ? "アイデアを編集" : "アイデアを登録";
   $("fTitle").value = src ? src.title : ""; $("fMemo").value = src ? src.memo : ""; $("fTag").value = "";
   const cur = src ? src.folder : (S.folder !== "all" ? S.folder : folderList()[0]);
-  $("fFolder").innerHTML = folderList().map(f => `<option value="${esc(f)}" ${f === cur ? "selected" : ""}>${parentOf(f) ? "　└ " + esc(leafOf(f)) : esc(f)}</option>`).join("") + `<option value="__new">+ 新しいフォルダ</option>`;
+  $("fFolder").innerHTML = folderList().map(f => `<option value="${esc(f)}" ${f === cur ? "selected" : ""}>${esc(indentLabel(f))}</option>`).join("") + `<option value="__new">+ 新しいフォルダ</option>`;
   $("newFolderWrap").hidden = true; $("fNewFolder").value = "";
-  $("fNewParent").innerHTML = `<option value="">(いちばん上に作る)</option>` + folderList().filter(f => !parentOf(f)).map(f => `<option value="${esc(f)}">${esc(f)} の中に作る</option>`).join("");
+  $("fNewParent").innerHTML = `<option value="">(いちばん上に作る)</option>` + folderList().filter(f => depthOf(f) < MAX_DEPTH - 1).map(f => `<option value="${esc(f)}">${esc(pretty(f))} の中に作る</option>`).join("");
   $("edDelete").hidden = !id;
   drawSlots(); drawTags(); drawRel();
   $("ovDetail").hidden = true; $("ovEdit").hidden = false;
@@ -369,7 +381,7 @@ function drawFolderManager() {
   $("fmList").innerHTML = list.map((f, k) => {
     const sib = siblings(list, f); const pos = sib.indexOf(f);
     return `
-    <div class="fmrow${parentOf(f) ? " sub" : ""}">
+    <div class="fmrow${parentOf(f) ? " sub" : ""}" style="--d:${depthOf(f)}">
       <input class="inp" id="fm${k}" value="${esc(leafOf(f))}" maxlength="30" aria-label="フォルダ名:${esc(pretty(f))}" data-old="${esc(f)}">
       <span class="fmn">${cnt(f)}件</span>
       <span class="fmmove"><button type="button" class="btn mv" data-fm-up="${k}" aria-label="${esc(leafOf(f))}を上へ" ${pos === 0 ? "disabled" : ""}>▲</button><button type="button" class="btn mv" data-fm-down="${k}" aria-label="${esc(leafOf(f))}を下へ" ${pos === sib.length - 1 ? "disabled" : ""}>▼</button></span>
@@ -377,7 +389,7 @@ function drawFolderManager() {
       <button type="button" class="btn danger" data-fm-del="${k}">削除</button>
     </div>`;
   }).join("");
-  $("fmParent").innerHTML = `<option value="">いちばん上に作る</option>` + list.filter(f => !parentOf(f)).map(f => `<option value="${esc(f)}">「${esc(f)}」の中に作る</option>`).join("");
+  $("fmParent").innerHTML = `<option value="">いちばん上に作る</option>` + list.filter(f => depthOf(f) < MAX_DEPTH - 1).map(f => `<option value="${esc(f)}">「${esc(pretty(f))}」の中に作る</option>`).join("");
   $("fmList").querySelectorAll("[data-fm-save]").forEach(b => b.onclick = () => {
     const inp = $("fm" + b.dataset.fmSave); renameFolder(inp.dataset.old, inp.value);
   });
@@ -431,7 +443,7 @@ function askDeleteFolder(path) {
   if (n && !dest) { toast("ほかにフォルダがないため削除できません"); return; }
   fmDeleting = { path, dest };
   const parts = [];
-  if (subs.length) parts.push(`中のサブフォルダ(${subs.map(leafOf).join("、")})も一緒に削除します。`);
+  if (subs.length) parts.push(`中のサブフォルダ(${subs.map(leafOf).join("、")}${list.some(p => p.startsWith(path + SEP) && parentOf(p) !== path) ? "とその下のフォルダ" : ""})も一緒に削除します。`);
   parts.push(n ? `中の${n}件のアイデアは「${pretty(dest)}」に移ります。アイデアは消えません。` : "中にアイデアはありません。");
   $("fdText").textContent = parts.join("");
   $("fdTitle").textContent = `「${leafOf(path)}」を削除しますか?`;
@@ -456,12 +468,13 @@ $("fmAdd").onclick = async () => {
   const list = folderList();
   if (list.includes(path)) { toast("同じ名前のフォルダがあります"); return; }
   // 子フォルダは親のすぐ後ろ(兄弟の最後)に入れる
+  if (depthOf(path) >= MAX_DEPTH) { toast(`フォルダは${MAX_DEPTH}段までです`); return; }
   let at = list.length;
-  if (parent) { const sibs = list.filter(p => p === parent || parentOf(p) === parent); at = list.indexOf(sibs[sibs.length - 1]) + 1; }
+  if (parent) { const fam = list.filter(p => p === parent || p.startsWith(parent + SEP)); at = list.indexOf(fam[fam.length - 1]) + 1; }
   list.splice(at, 0, path);
   S.folders = list; S.folderLog[path] = { del: false, ts: Date.now() }; S.folderOrderAt = Date.now(); $("fmNew").value = "";
   await saveMeta(); render(); drawFolderManager(); scheduleSync();
-  toast(parent ? `「${parent}」の中に「${name}」を作りました` : `「${name}」を作りました`);
+  toast(parent ? `「${pretty(parent)}」の中に「${name}」を作りました` : `「${name}」を作りました`);
 };
 $("sideManage").onclick = openFolderManager;
 
