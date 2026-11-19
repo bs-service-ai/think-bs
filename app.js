@@ -56,7 +56,7 @@ const store = {
 
 /* ---------- 状態 ---------- */
 const DEFAULT_FOLDERS = ["新製品開発", "修理・現場記録", "楽天企画", "その他"];
-const S = { ideas: [], folders: [], folderLog: {}, deleted: {}, trash: [], view: "card", folder: "all", tag: null, q: "" };
+const S = { ideas: [], folders: [], folderOrderAt: 0, folderLog: {}, deleted: {}, trash: [], view: "card", folder: "all", tag: null, q: "" };
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -68,6 +68,7 @@ const imgCache = new Map(); // 画像id → dataURL(表示用)
 async function saveMeta() {
   await store.set("folders", S.folders);
   await store.set("folderLog", S.folderLog);
+  await store.set("folderOrderAt", S.folderOrderAt);
   await store.set("deleted", S.deleted);
   await store.set("trash", S.trash);
 }
@@ -78,6 +79,7 @@ async function init() {
   S.ideas = (await store.allIdeas()).map(normalize);
   S.folders = (await store.get("folders")) || DEFAULT_FOLDERS.slice();
   S.folderLog = (await store.get("folderLog")) || {};
+  S.folderOrderAt = (await store.get("folderOrderAt")) || 0;
   S.deleted = (await store.get("deleted")) || {};
   S.trash = (await store.get("trash")) || [];
   S.view = (await store.get("view")) || "card";
@@ -344,10 +346,11 @@ const FALLBACK = "その他";
 function openFolderManager() { drawFolderManager(); $("ovFolders").hidden = false; }
 function drawFolderManager() {
   const cnt = f => S.ideas.filter(i => i.folder === f).length;
-  $("fmList").innerHTML = folderList().map((f, k) => `
+  $("fmList").innerHTML = folderList().map((f, k, arr) => `
     <div class="fmrow">
       <input class="inp" id="fm${k}" value="${esc(f)}" maxlength="30" aria-label="フォルダ名:${esc(f)}" data-old="${esc(f)}">
       <span class="fmn">${cnt(f)}件</span>
+      <span class="fmmove"><button type="button" class="btn mv" data-fm-up="${k}" aria-label="${esc(f)}を上へ" ${k === 0 ? "disabled" : ""}>▲</button><button type="button" class="btn mv" data-fm-down="${k}" aria-label="${esc(f)}を下へ" ${k === arr.length - 1 ? "disabled" : ""}>▼</button></span>
       <button type="button" class="btn" data-fm-save="${k}">名前を変更</button>
       <button type="button" class="btn danger" data-fm-del="${k}">削除</button>
     </div>`).join("");
@@ -357,7 +360,19 @@ function drawFolderManager() {
   $("fmList").querySelectorAll("input").forEach(inp => inp.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); renameFolder(inp.dataset.old, inp.value.trim()); }
   }));
+  $("fmList").querySelectorAll("[data-fm-up]").forEach(b => b.onclick = () => moveFolder(+b.dataset.fmUp, -1));
+  $("fmList").querySelectorAll("[data-fm-down]").forEach(b => b.onclick = () => moveFolder(+b.dataset.fmDown, 1));
   $("fmList").querySelectorAll("[data-fm-del]").forEach(b => b.onclick = () => askDeleteFolder($("fm" + b.dataset.fmDel).dataset.old));
+}
+async function moveFolder(k, dir) {
+  const list = folderList(); const j = k + dir;
+  if (j < 0 || j >= list.length) return;
+  [list[k], list[j]] = [list[j], list[k]];
+  S.folders = list; S.folderOrderAt = Date.now();
+  await saveMeta(); render(); drawFolderManager();
+  const btn = document.querySelector(`[data-fm-${dir < 0 ? "up" : "down"}="${j}"]`) || document.querySelector(`[data-fm-${dir < 0 ? "down" : "up"}="${j}"]`);
+  if (btn) btn.focus();
+  scheduleSync();
 }
 async function renameFolder(oldName, newName) {
   if (!newName) { toast("フォルダ名を入力してください"); return; }
@@ -368,7 +383,7 @@ async function renameFolder(oldName, newName) {
   const k = S.folders.indexOf(oldName);
   if (merging) S.folders = S.folders.filter(f => f !== oldName);
   else if (k >= 0) S.folders[k] = newName; else S.folders.push(newName);
-  S.folderLog[oldName] = { del: true, ts: now }; S.folderLog[newName] = { del: false, ts: now };
+  S.folderLog[oldName] = { del: true, ts: now }; S.folderLog[newName] = { del: false, ts: now }; S.folderOrderAt = now;
   if (S.folder === oldName) S.folder = newName;
   await saveMeta(); render(); drawFolderManager();
   toast(merging ? `「${oldName}」を「${newName}」にまとめました` : `「${newName}」に変更しました`);
@@ -387,8 +402,9 @@ function askDeleteFolder(name) {
 $("fdOk").onclick = async () => {
   const { name, dest } = fmDeleting; const now = Date.now();
   for (const i of S.ideas) if (i.folder === name) { i.folder = dest; i.syncAt = now; await store.putIdea(i); }
+  S.folders = folderList();
   if (dest && !S.folders.includes(dest)) { S.folders.push(dest); S.folderLog[dest] = { del: false, ts: now }; }
-  S.folders = S.folders.filter(f => f !== name); S.folderLog[name] = { del: true, ts: now };
+  S.folders = S.folders.filter(f => f !== name); S.folderLog[name] = { del: true, ts: now }; S.folderOrderAt = now;
   if (S.folder === name) S.folder = "all";
   await saveMeta(); $("ovFolderDel").hidden = true; render(); drawFolderManager(); toast(`「${name}」を削除しました`);
   scheduleSync();
@@ -396,7 +412,7 @@ $("fdOk").onclick = async () => {
 $("fmAdd").onclick = async () => {
   const v = $("fmNew").value.trim(); if (!v) { $("fmNew").focus(); return; }
   if (folderList().includes(v)) { toast("同じ名前のフォルダがあります"); return; }
-  S.folders.push(v); S.folderLog[v] = { del: false, ts: Date.now() }; $("fmNew").value = "";
+  S.folders = folderList(); S.folders.push(v); S.folderLog[v] = { del: false, ts: Date.now() }; S.folderOrderAt = Date.now(); $("fmNew").value = "";
   await saveMeta(); render(); drawFolderManager(); scheduleSync();
 };
 $("sideManage").onclick = openFolderManager;
@@ -579,9 +595,13 @@ function mergeData(local, remote) {
   // フォルダ:名前ごとに「追加/削除」の新しい方を採用
   const folderLog = { ...(remote.folderLog || {}) };
   for (const [k, v] of Object.entries(local.folderLog || {})) if (!folderLog[k] || v.ts > folderLog[k].ts) folderLog[k] = v;
-  const names = [...new Set([...(local.folders || []), ...(remote.folders || []), ...Object.keys(folderLog).filter(k => !folderLog[k].del)])];
+  // 並び順:最後に並べ替え・変更した方の順番を使う
+  const remoteFirst = (remote.folderOrderAt || 0) > (local.folderOrderAt || 0);
+  const [first, second] = remoteFirst ? [remote.folders || [], local.folders || []] : [local.folders || [], remote.folders || []];
+  const names = [...new Set([...first, ...second, ...Object.keys(folderLog).filter(k => !folderLog[k].del)])];
   const folders = names.filter(n => !(folderLog[n] && folderLog[n].del));
-  return { ideas, deleted, folders, folderLog };
+  const folderOrderAt = Math.max(remote.folderOrderAt || 0, local.folderOrderAt || 0);
+  return { ideas, deleted, folders, folderLog, folderOrderAt };
 }
 
 let syncing = false, again = false, syncTimer = null;
@@ -619,9 +639,9 @@ async function syncOnce() {
   if (dataId) remote = await (await api(`files/${dataId}?alt=media`)).json();
 
   // 取り込み
-  const merged = mergeData({ ideas: S.ideas, deleted: S.deleted, folders: S.folders, folderLog: S.folderLog }, remote);
+  const merged = mergeData({ ideas: S.ideas, deleted: S.deleted, folders: S.folders, folderLog: S.folderLog, folderOrderAt: S.folderOrderAt }, remote);
   const before = JSON.stringify([S.ideas.map(i => [i.id, i.syncAt]).sort(), S.folders]);
-  S.ideas = merged.ideas; S.deleted = merged.deleted; S.folders = merged.folders; S.folderLog = merged.folderLog;
+  S.ideas = merged.ideas; S.deleted = merged.deleted; S.folders = merged.folders; S.folderLog = merged.folderLog; S.folderOrderAt = merged.folderOrderAt;
   await store.replaceIdeas(S.ideas); await saveMeta();
   if (JSON.stringify([S.ideas.map(i => [i.id, i.syncAt]).sort(), S.folders]) !== before) { render(); refreshOpenDetail(); }
 
@@ -640,7 +660,7 @@ async function syncOnce() {
   // データファイルを書き出す
   const payload = {
     app: "Think BS", version: 1, savedAt: Date.now(),
-    folders: S.folders, folderLog: S.folderLog, deleted: S.deleted,
+    folders: S.folders, folderOrderAt: S.folderOrderAt, folderLog: S.folderLog, deleted: S.deleted,
     ideas: S.ideas.map(i => ({ id: i.id, title: i.title, memo: i.memo, folder: i.folder, tags: i.tags, images: i.images, related: i.related, createdAt: i.createdAt, updatedAt: i.updatedAt, syncAt: i.syncAt }))
   };
   const blob = new Blob([JSON.stringify(payload, null, 1)], { type: "application/json" });
