@@ -38,6 +38,7 @@
 
 <div class="mobilebar">
   <div class="scrollrow" id="mFolders" aria-label="フォルダ"></div>
+  <div class="scrollrow" id="mSub" aria-label="サブフォルダ" hidden></div>
   <div class="scrollrow" id="mTags" aria-label="タグ"></div>
 </div>
 
@@ -90,8 +91,11 @@
       <div class="two">
         <label class="f" for="fFolder">フォルダ
           <select class="inp" id="fFolder"></select></label>
-        <label class="f" for="fNewFolder" id="newFolderWrap" hidden>新しいフォルダ名
-          <input class="inp" id="fNewFolder" maxlength="30" placeholder="例:発電機メンテ"></label>
+        <div class="f" id="newFolderWrap" hidden>
+          <label for="fNewFolder">新しいフォルダ名</label>
+          <input class="inp" id="fNewFolder" maxlength="30" placeholder="例:発電機メンテ">
+          <select class="inp" id="fNewParent" aria-label="作る場所"></select>
+        </div>
       </div>
       <div class="f"><span>画像(1件につき3枚まで)</span>
         <div class="imgslots" id="slots"></div>
@@ -149,9 +153,10 @@
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="fmTitle">
     <div class="dhead"><h2 id="fmTitle">フォルダの管理</h2><button class="iconbtn" type="button" data-close aria-label="閉じる">✕</button></div>
     <div class="dbody">
-      <p class="hint">▲▼で並び順を変えられます。名前を書き換えて「名前を変更」を押すと名前が変わります。すでにある名前にすると、2つのフォルダが1つにまとまります。</p>
+      <p class="hint">▲▼で並び順を変えられます(サブフォルダは同じ親の中で並べ替え)。名前を書き換えて「名前を変更」を押すと名前が変わります。すでにある名前にすると、2つのフォルダが1つにまとまります。</p>
       <div class="fmlist" id="fmList"></div>
       <div class="fmrow add">
+        <select class="inp" id="fmParent" aria-label="作る場所"></select>
         <input class="inp" id="fmNew" maxlength="30" placeholder="新しいフォルダ名" aria-label="新しいフォルダ名">
         <button type="button" class="btn primary" id="fmAdd">追加</button>
       </div>

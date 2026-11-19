@@ -106,22 +106,38 @@ function allTags() {
   const m = new Map(); S.ideas.forEach(i => i.tags.forEach(t => m.set(t, (m.get(t) || 0) + 1)));
   return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ja"));
 }
+/* フォルダは「親」または「親/子」の2段。値は "/" でつないだ文字列で持つ */
+const SEP = "/";
+const parentOf = p => p.includes(SEP) ? p.slice(0, p.indexOf(SEP)) : null;
+const leafOf = p => p.includes(SEP) ? p.slice(p.indexOf(SEP) + 1) : p;
+const pretty = p => p.split(SEP).join(" › ");
+const inFolder = (i, f) => i.folder === f || i.folder.startsWith(f + SEP);
+const cleanName = v => v.replace(/[\/／]/g, " ").replace(/\s+/g, " ").trim();
 function folderList() {
-  const set = new Set(S.folders); S.ideas.forEach(i => set.add(i.folder)); return [...set];
+  const raw = [...new Set([...S.folders, ...S.ideas.map(i => i.folder)])];
+  for (const f of [...raw]) { const p = parentOf(f); if (p && !raw.includes(p)) raw.push(p); }
+  const tops = raw.filter(f => !parentOf(f));
+  const out = [];
+  for (const t of tops) { out.push(t); raw.filter(f => parentOf(f) === t).forEach(c => out.push(c)); }
+  return out;
 }
 function filtered() {
   const q = S.q.trim().toLowerCase();
-  return S.ideas.filter(i => (S.folder === "all" || i.folder === S.folder) && (!S.tag || i.tags.includes(S.tag)) &&
+  return S.ideas.filter(i => (S.folder === "all" || inFolder(i, S.folder)) && (!S.tag || i.tags.includes(S.tag)) &&
     (!q || [i.title, i.memo, i.folder, ...i.tags].join(" ").toLowerCase().includes(q)))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 function render() {
   $("vCard").setAttribute("aria-pressed", S.view === "card"); $("vList").setAttribute("aria-pressed", S.view === "list");
-  const cnt = f => S.ideas.filter(i => f === "all" || i.folder === f).length;
+  const cnt = f => S.ideas.filter(i => f === "all" || inFolder(i, f)).length;
   const fl = ["all", ...folderList()];
   if (S.folder !== "all" && !fl.includes(S.folder)) S.folder = "all";
-  $("folders").innerHTML = fl.map(f => `<button type="button" data-folder="${esc(f)}" aria-current="${S.folder === f}"><span>${f === "all" ? "すべて" : esc(f)}</span><span class="n">${cnt(f)}</span></button>`).join("");
-  $("mFolders").innerHTML = fl.map(f => `<button type="button" class="chip" data-folder="${esc(f)}" aria-pressed="${S.folder === f}">${f === "all" ? "すべて" : esc(f)} ${cnt(f)}</button>`).join("")
+  $("folders").innerHTML = fl.map(f => `<button type="button" class="${f !== "all" && parentOf(f) ? "sub" : ""}" data-folder="${esc(f)}" aria-current="${S.folder === f}"><span>${f === "all" ? "すべて" : esc(leafOf(f))}</span><span class="n">${cnt(f)}</span></button>`).join("");
+  const top = S.folder === "all" ? null : (parentOf(S.folder) || S.folder);
+  const subs = top ? fl.filter(f => f !== "all" && parentOf(f) === top) : [];
+  $("mSub").hidden = !subs.length;
+  $("mSub").innerHTML = subs.length ? `<button type="button" class="chip" data-folder="${esc(top)}" aria-pressed="${S.folder === top}">${esc(top)}のすべて</button>` + subs.map(f => `<button type="button" class="chip" data-folder="${esc(f)}" aria-pressed="${S.folder === f}">└ ${esc(leafOf(f))} ${cnt(f)}</button>`).join("") : "";
+  $("mFolders").innerHTML = fl.filter(f => f === "all" || !parentOf(f)).map(f => `<button type="button" class="chip" data-folder="${esc(f)}" aria-pressed="${S.folder === f || (f !== "all" && f === top)}">${f === "all" ? "すべて" : esc(f)} ${cnt(f)}</button>`).join("")
     + `<button type="button" class="chip" data-manage-folders>✎ フォルダ編集</button>`;
   const tags = allTags();
   if (S.tag && !tags.some(([t]) => t === S.tag)) S.tag = null;
@@ -129,7 +145,7 @@ function render() {
   $("tags").innerHTML = tagBtns || `<span class="hint">タグはまだありません</span>`;
   $("mTags").innerHTML = tagBtns;
   $("tagList").innerHTML = tags.map(([t]) => `<option value="${esc(t)}">`).join("");
-  $("heading").textContent = S.folder === "all" ? "すべてのアイデア" : S.folder;
+  $("heading").textContent = S.folder === "all" ? "すべてのアイデア" : pretty(S.folder);
   const list = filtered();
   $("count").textContent = list.length + "件";
   const af = [];
@@ -151,13 +167,13 @@ function render() {
           <h3>${esc(i.title)}</h3>
           ${i.memo ? `<p class="excerpt">${esc(i.memo)}</p>` : ""}
           <div class="meta">${i.tags.slice(0, 4).map(t => `<span class="chip tag">${esc(t)}</span>`).join("")}</div>
-          <div class="meta"><span class="folderpill">${esc(i.folder)}</span><span class="date">${fmt(i.updatedAt)}</span></div>
+          <div class="meta"><span class="folderpill">${esc(pretty(i.folder))}</span><span class="date">${fmt(i.updatedAt)}</span></div>
         </div></button>`).join("") + `</div>`;
   } else {
     $("items").innerHTML = `<div class="list">` + list.map(i => `
       <button type="button" class="row" data-open="${i.id}">
         <div class="info"><h3>${esc(i.title)}</h3><p>${esc(i.memo.replace(/\n/g, " "))}</p></div>
-        <div class="rowmeta"><span class="folderpill">${esc(i.folder)}</span><span><span class="date">${fmt(i.updatedAt)}</span>${i.images.length ? ` ・画像${i.images.length}` : ""}</span></div>
+        <div class="rowmeta"><span class="folderpill">${esc(pretty(i.folder))}</span><span><span class="date">${fmt(i.updatedAt)}</span>${i.images.length ? ` ・画像${i.images.length}` : ""}</span></div>
       </button>`).join("") + `</div>`;
   }
 }
@@ -240,8 +256,9 @@ async function openEditor(id, newImages) {
   $("edTitle").textContent = id ? "アイデアを編集" : "アイデアを登録";
   $("fTitle").value = src ? src.title : ""; $("fMemo").value = src ? src.memo : ""; $("fTag").value = "";
   const cur = src ? src.folder : (S.folder !== "all" ? S.folder : folderList()[0]);
-  $("fFolder").innerHTML = folderList().map(f => `<option ${f === cur ? "selected" : ""}>${esc(f)}</option>`).join("") + `<option value="__new">+ 新しいフォルダ</option>`;
+  $("fFolder").innerHTML = folderList().map(f => `<option value="${esc(f)}" ${f === cur ? "selected" : ""}>${parentOf(f) ? "　└ " + esc(leafOf(f)) : esc(f)}</option>`).join("") + `<option value="__new">+ 新しいフォルダ</option>`;
   $("newFolderWrap").hidden = true; $("fNewFolder").value = "";
+  $("fNewParent").innerHTML = `<option value="">(いちばん上に作る)</option>` + folderList().filter(f => !parentOf(f)).map(f => `<option value="${esc(f)}">${esc(f)} の中に作る</option>`).join("");
   $("edDelete").hidden = !id;
   drawSlots(); drawTags(); drawRel();
   $("ovDetail").hidden = true; $("ovEdit").hidden = false;
@@ -301,8 +318,9 @@ $("edForm").addEventListener("submit", async e => {
   if ($("fTag").value.trim()) addTag();
   let folder = $("fFolder").value;
   if (folder === "__new") {
-    folder = $("fNewFolder").value.trim();
-    if (!folder) { $("fNewFolder").focus(); toast("新しいフォルダ名を入力してください"); return; }
+    const name = cleanName($("fNewFolder").value);
+    if (!name) { $("fNewFolder").focus(); toast("新しいフォルダ名を入力してください"); return; }
+    folder = $("fNewParent").value ? $("fNewParent").value + SEP + name : name;
   }
   if (!S.folders.includes(folder)) { S.folders.push(folder); S.folderLog[folder] = { del: false, ts: Date.now() }; }
   const now = Date.now(); const old = E.id ? byId(E.id) : null;
@@ -344,76 +362,106 @@ $("cfOk").onclick = async () => {
 /* ---------- フォルダの管理 ---------- */
 const FALLBACK = "その他";
 function openFolderManager() { drawFolderManager(); $("ovFolders").hidden = false; }
+function siblings(list, f) { const p = parentOf(f); return list.filter(x => parentOf(x) === p); }
 function drawFolderManager() {
-  const cnt = f => S.ideas.filter(i => i.folder === f).length;
-  $("fmList").innerHTML = folderList().map((f, k, arr) => `
-    <div class="fmrow">
-      <input class="inp" id="fm${k}" value="${esc(f)}" maxlength="30" aria-label="フォルダ名:${esc(f)}" data-old="${esc(f)}">
+  const list = folderList();
+  const cnt = f => S.ideas.filter(i => inFolder(i, f)).length;
+  $("fmList").innerHTML = list.map((f, k) => {
+    const sib = siblings(list, f); const pos = sib.indexOf(f);
+    return `
+    <div class="fmrow${parentOf(f) ? " sub" : ""}">
+      <input class="inp" id="fm${k}" value="${esc(leafOf(f))}" maxlength="30" aria-label="フォルダ名:${esc(pretty(f))}" data-old="${esc(f)}">
       <span class="fmn">${cnt(f)}件</span>
-      <span class="fmmove"><button type="button" class="btn mv" data-fm-up="${k}" aria-label="${esc(f)}を上へ" ${k === 0 ? "disabled" : ""}>▲</button><button type="button" class="btn mv" data-fm-down="${k}" aria-label="${esc(f)}を下へ" ${k === arr.length - 1 ? "disabled" : ""}>▼</button></span>
+      <span class="fmmove"><button type="button" class="btn mv" data-fm-up="${k}" aria-label="${esc(leafOf(f))}を上へ" ${pos === 0 ? "disabled" : ""}>▲</button><button type="button" class="btn mv" data-fm-down="${k}" aria-label="${esc(leafOf(f))}を下へ" ${pos === sib.length - 1 ? "disabled" : ""}>▼</button></span>
       <button type="button" class="btn" data-fm-save="${k}">名前を変更</button>
       <button type="button" class="btn danger" data-fm-del="${k}">削除</button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
+  $("fmParent").innerHTML = `<option value="">いちばん上に作る</option>` + list.filter(f => !parentOf(f)).map(f => `<option value="${esc(f)}">「${esc(f)}」の中に作る</option>`).join("");
   $("fmList").querySelectorAll("[data-fm-save]").forEach(b => b.onclick = () => {
-    const inp = $("fm" + b.dataset.fmSave); renameFolder(inp.dataset.old, inp.value.trim());
+    const inp = $("fm" + b.dataset.fmSave); renameFolder(inp.dataset.old, inp.value);
   });
   $("fmList").querySelectorAll("input").forEach(inp => inp.addEventListener("keydown", e => {
-    if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); renameFolder(inp.dataset.old, inp.value.trim()); }
+    if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); renameFolder(inp.dataset.old, inp.value); }
   }));
-  $("fmList").querySelectorAll("[data-fm-up]").forEach(b => b.onclick = () => moveFolder(+b.dataset.fmUp, -1));
-  $("fmList").querySelectorAll("[data-fm-down]").forEach(b => b.onclick = () => moveFolder(+b.dataset.fmDown, 1));
-  $("fmList").querySelectorAll("[data-fm-del]").forEach(b => b.onclick = () => askDeleteFolder($("fm" + b.dataset.fmDel).dataset.old));
+  $("fmList").querySelectorAll("[data-fm-up]").forEach(b => b.onclick = () => moveFolder(list[+b.dataset.fmUp], -1));
+  $("fmList").querySelectorAll("[data-fm-down]").forEach(b => b.onclick = () => moveFolder(list[+b.dataset.fmDown], 1));
+  $("fmList").querySelectorAll("[data-fm-del]").forEach(b => b.onclick = () => askDeleteFolder(list[+b.dataset.fmDel]));
 }
-async function moveFolder(k, dir) {
-  const list = folderList(); const j = k + dir;
-  if (j < 0 || j >= list.length) return;
-  [list[k], list[j]] = [list[j], list[k]];
+async function moveFolder(f, dir) {
+  const list = folderList(); const sib = siblings(list, f); const pos = sib.indexOf(f);
+  const other = sib[pos + dir]; if (!other) return;
+  const a = list.indexOf(f), b = list.indexOf(other);
+  [list[a], list[b]] = [list[b], list[a]];
   S.folders = list; S.folderOrderAt = Date.now();
   await saveMeta(); render(); drawFolderManager();
-  const btn = document.querySelector(`[data-fm-${dir < 0 ? "up" : "down"}="${j}"]`) || document.querySelector(`[data-fm-${dir < 0 ? "down" : "up"}="${j}"]`);
+  const k = folderList().indexOf(f);
+  const btn = document.querySelector(`[data-fm-${dir < 0 ? "up" : "down"}="${k}"]:not([disabled])`) || document.querySelector(`[data-fm-${dir < 0 ? "down" : "up"}="${k}"]`);
   if (btn) btn.focus();
   scheduleSync();
 }
-async function renameFolder(oldName, newName) {
-  if (!newName) { toast("フォルダ名を入力してください"); return; }
-  if (newName === oldName) return;
-  const merging = folderList().includes(newName);
+async function renameFolder(oldPath, newLeaf) {
+  newLeaf = cleanName(newLeaf);
+  if (!newLeaf) { toast("フォルダ名を入力してください"); return; }
+  const parent = parentOf(oldPath);
+  const newPath = parent ? parent + SEP + newLeaf : newLeaf;
+  if (newPath === oldPath) return;
+  const list = folderList();
+  const merging = list.includes(newPath);
+  const map = p => p === oldPath ? newPath : (p.startsWith(oldPath + SEP) ? newPath + p.slice(oldPath.length) : p);
   const now = Date.now();
-  for (const i of S.ideas) if (i.folder === oldName) { i.folder = newName; i.syncAt = now; await store.putIdea(i); }
-  const k = S.folders.indexOf(oldName);
-  if (merging) S.folders = S.folders.filter(f => f !== oldName);
-  else if (k >= 0) S.folders[k] = newName; else S.folders.push(newName);
-  S.folderLog[oldName] = { del: true, ts: now }; S.folderLog[newName] = { del: false, ts: now }; S.folderOrderAt = now;
-  if (S.folder === oldName) S.folder = newName;
+  for (const i of S.ideas) { const n = map(i.folder); if (n !== i.folder) { i.folder = n; i.syncAt = now; await store.putIdea(i); } }
+  const affected = list.filter(p => map(p) !== p);
+  S.folders = [...new Set(list.map(map))];
+  for (const p of affected) { S.folderLog[p] = { del: true, ts: now }; S.folderLog[map(p)] = { del: false, ts: now }; }
+  S.folderOrderAt = now;
+  if (S.folder !== "all") S.folder = map(S.folder);
   await saveMeta(); render(); drawFolderManager();
-  toast(merging ? `「${oldName}」を「${newName}」にまとめました` : `「${newName}」に変更しました`);
+  toast(merging ? `「${leafOf(oldPath)}」を「${newLeaf}」にまとめました` : `「${newLeaf}」に変更しました`);
   scheduleSync();
 }
 let fmDeleting = null;
-function askDeleteFolder(name) {
-  const n = S.ideas.filter(i => i.folder === name).length;
-  const dest = name === FALLBACK ? (folderList().find(f => f !== FALLBACK) || null) : FALLBACK;
+function askDeleteFolder(path) {
+  const list = folderList();
+  const subs = list.filter(p => parentOf(p) === path);
+  const n = S.ideas.filter(i => inFolder(i, path)).length;
+  // 子フォルダを消すときは親へ、親フォルダを消すときは「その他」へ移す
+  let dest = parentOf(path) || FALLBACK;
+  if (dest === path) dest = list.find(f => !parentOf(f) && f !== path) || null;
   if (n && !dest) { toast("ほかにフォルダがないため削除できません"); return; }
-  fmDeleting = { name, dest };
-  $("fdText").textContent = n ? `中の${n}件のアイデアは「${dest}」に移ります。アイデアは消えません。` : "このフォルダは空です。";
-  $("fdTitle").textContent = `「${name}」を削除しますか?`;
+  fmDeleting = { path, dest };
+  const parts = [];
+  if (subs.length) parts.push(`中のサブフォルダ(${subs.map(leafOf).join("、")})も一緒に削除します。`);
+  parts.push(n ? `中の${n}件のアイデアは「${pretty(dest)}」に移ります。アイデアは消えません。` : "中にアイデアはありません。");
+  $("fdText").textContent = parts.join("");
+  $("fdTitle").textContent = `「${leafOf(path)}」を削除しますか?`;
   $("ovFolderDel").hidden = false;
 }
 $("fdOk").onclick = async () => {
-  const { name, dest } = fmDeleting; const now = Date.now();
-  for (const i of S.ideas) if (i.folder === name) { i.folder = dest; i.syncAt = now; await store.putIdea(i); }
-  S.folders = folderList();
+  const { path, dest } = fmDeleting; const now = Date.now();
+  for (const i of S.ideas) if (inFolder(i, path)) { i.folder = dest; i.syncAt = now; await store.putIdea(i); }
+  const list = folderList();
+  const gone = list.filter(p => p === path || p.startsWith(path + SEP));
+  S.folders = list.filter(p => !gone.includes(p));
   if (dest && !S.folders.includes(dest)) { S.folders.push(dest); S.folderLog[dest] = { del: false, ts: now }; }
-  S.folders = S.folders.filter(f => f !== name); S.folderLog[name] = { del: true, ts: now }; S.folderOrderAt = now;
-  if (S.folder === name) S.folder = "all";
-  await saveMeta(); $("ovFolderDel").hidden = true; render(); drawFolderManager(); toast(`「${name}」を削除しました`);
+  for (const p of gone) S.folderLog[p] = { del: true, ts: now };
+  S.folderOrderAt = now;
+  if (S.folder !== "all" && gone.includes(S.folder)) S.folder = "all";
+  await saveMeta(); $("ovFolderDel").hidden = true; render(); drawFolderManager(); toast(`「${leafOf(path)}」を削除しました`);
   scheduleSync();
 };
 $("fmAdd").onclick = async () => {
-  const v = $("fmNew").value.trim(); if (!v) { $("fmNew").focus(); return; }
-  if (folderList().includes(v)) { toast("同じ名前のフォルダがあります"); return; }
-  S.folders = folderList(); S.folders.push(v); S.folderLog[v] = { del: false, ts: Date.now() }; S.folderOrderAt = Date.now(); $("fmNew").value = "";
+  const name = cleanName($("fmNew").value); if (!name) { $("fmNew").focus(); return; }
+  const parent = $("fmParent").value; const path = parent ? parent + SEP + name : name;
+  const list = folderList();
+  if (list.includes(path)) { toast("同じ名前のフォルダがあります"); return; }
+  // 子フォルダは親のすぐ後ろ(兄弟の最後)に入れる
+  let at = list.length;
+  if (parent) { const sibs = list.filter(p => p === parent || parentOf(p) === parent); at = list.indexOf(sibs[sibs.length - 1]) + 1; }
+  list.splice(at, 0, path);
+  S.folders = list; S.folderLog[path] = { del: false, ts: Date.now() }; S.folderOrderAt = Date.now(); $("fmNew").value = "";
   await saveMeta(); render(); drawFolderManager(); scheduleSync();
+  toast(parent ? `「${parent}」の中に「${name}」を作りました` : `「${name}」を作りました`);
 };
 $("sideManage").onclick = openFolderManager;
 
@@ -452,7 +500,7 @@ function openDetail(id) {
   const back = S.ideas.filter(x => x.related.includes(id) && !i.related.includes(x.id));
   const relBtn = x => `<button type="button" data-open="${x.id}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/></svg>${esc(x.title)}</button>`;
   $("dtBody").innerHTML = `
-    <div class="meta"><span class="folderpill">${esc(i.folder)}</span>${i.tags.map(t => `<span class="chip tag">${esc(t)}</span>`).join("")}<span class="date">更新 ${fmt(i.updatedAt)}</span></div>
+    <div class="meta"><span class="folderpill">${esc(pretty(i.folder))}</span>${i.tags.map(t => `<span class="chip tag">${esc(t)}</span>`).join("")}<span class="date">更新 ${fmt(i.updatedAt)}</span></div>
     ${i.images.length ? `<div class="dimgs" id="dtImgs">${i.images.map((m, k) => `<button type="button" data-lb="${k}" aria-label="画像${k + 1}を拡大">読み込み中…</button>`).join("")}</div>` : ""}
     ${i.memo ? `<p class="memo">${esc(i.memo)}</p>` : `<p class="hint">メモはありません</p>`}
     ${rel.length || back.length ? `<div><p class="section-label">Related</p><div class="rel">${[...rel, ...back].map(relBtn).join("")}</div></div>` : ""}`;
